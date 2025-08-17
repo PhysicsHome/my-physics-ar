@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="kk">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>AR-Өлшеуші (SaL Physics) — WebAR үлгі</title>
+  <!-- A-Frame және AR.js -->
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://raw.githack.com/AR-js-org/AR.js/master/aframe/build/aframe-ar.js"></script>
+  <style>
+    body { margin:0; overflow:hidden; font-family:system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; }
+    #hud { position:fixed; top:0; left:0; right:0; background:rgba(20,20,20,.75); color:#fff; padding:.6rem .8rem; display:flex; gap:.8rem; align-items:center; flex-wrap:wrap; z-index:10; backdrop-filter: blur(6px); }
+    .badge { padding:.2rem .5rem; border:1px solid rgba(255,255,255,.25); border-radius:.5rem; font-size:.8rem; }
+    label { font-size:.9rem; opacity:.9; }
+    input[type=number], input[type=text] { padding:.3rem .45rem; border-radius:.4rem; border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.1); color:#fff; width:5.2rem; }
+    input[type=range] { width:120px; }
+    button { padding:.45rem .7rem; border-radius:.6rem; border:1px solid rgba(255,255,255,.25); background:#2b7fff; color:#fff; cursor:pointer; }
+    button.secondary { background:transparent; }
+    #task { font-weight:600; }
+    #toast { position:fixed; bottom:12px; left:50%; transform:translateX(-50%); background:#111; color:#fff; padding:.6rem .9rem; border-radius:.7rem; border:1px solid rgba(255,255,255,.15); opacity:0; transition:opacity .25s ease; z-index:10; }
+    #toast.show { opacity:1; }
+    .help { position:fixed; right:10px; bottom:10px; background:rgba(0,0,0,.6); color:#fff; padding:.5rem .7rem; border-radius:.6rem; font-size:.85rem; border:1px solid rgba(255,255,255,.2); }
+    details { margin-left:auto; }
+    summary { cursor:pointer; }
+  </style>
+</head>
+<body>
+  <!-- Үстіңгі басқару панелі (HUD) -->
+  <div id="hud">
+    <span class="badge">AR-Өлшеуші • SaL Physics</span>
+    <span id="task">Миссия: қарындаштың ұзындығын және стакандағы судың көлемін өлшеңіз.</span>
+    <label>Калибрлеу (масштаб): <input id="scale" type="range" min="60" max="140" value="100"> <span id="scaleVal">100%</span></label>
+    <label>Су деңгейі (мл): <input id="waterml" type="range" min="0" max="100" step="5" value="60"> <span id="waterVal">60</span></label>
+    <label>Ұзындық (см): <input id="lenInput" type="number" step="0.1" placeholder="см"></label>
+    <label>Көлем (мл): <input id="volInput" type="number" step="1" placeholder="мл"></label>
+    <button id="check">Тексеру</button>
+    <button id="newtask" class="secondary">Жаңа миссия</button>
+    <details>
+      <summary>Нұсқаулық</summary>
+      <div style="max-width:520px; line-height:1.35; padding-top:.4rem;">
+        1) Хиро (Hiro) маркерін экраннан көрсетіңіз немесе басып шығарыңыз. <br/>
+        2) Камераны маркерге бағыттаңыз — сызғыш пен мензурка пайда болады. <br/>
+        3) Нысанды (қарындаш, стақан) маркер жанына қойып, өлшеуді алыңыз. <br/>
+        4) Ұядағы «Калибрлеу» жүгірткісімен виртуалды шкаланы нақты см/мл-ге сәйкестеңіз. <br/>
+        5) Өлшенген мәндерді енгізіп, «Тексеру» батырмасын басыңыз.
+      </div>
+    </details>
+  </div>
+
+  <div id="toast"></div>
+  <div class="help">Маркер: <b>preset=hiro</b>. Егер өлшем сәйкес келмесе, <b>Калибрлеу</b> жүгірткісін қолданыңыз.</div>
+
+  <!-- AR сахнасы -->
+  <a-scene embedded vr-mode-ui="enabled: false" renderer="logarithmicDepthBuffer: true" arjs="sourceType: webcam; detectionMode: mono; debugUIEnabled: false;">
+    <!-- Маркер: стандартты Hiro -->
+    <a-marker preset="hiro">
+      <!-- Референс жазықтық (маркер үсті) -->
+      <a-plane position="0 0 0" rotation="-90 0 0" width="1" height="1" color="#333" opacity="0.15"></a-plane>
+
+      <!-- Сызғыш (0–20 см) -->
+      <a-entity id="ruler" position="0 0.01 0.1"></a-entity>
+
+      <!-- Мензурка (0–100 мл) -->
+      <a-entity id="beaker" position="0 0.01 -0.05"></a-entity>
+
+      <!-- Көмекші координат торы (өшіргіңіз келсе opacity азайтыңыз) -->
+      <a-entity position="0 0 0" rotation="-90 0 0">
+        <a-grid width="0.6" height="0.6" divisions="12" color="#666"></a-grid>
+      </a-entity>
+    </a-marker>
+
+    <a-entity camera></a-entity>
+  </a-scene>
+
+  <!-- Кіші компонент: grid (визуал көмек) -->
+  <script>
+    AFRAME.registerPrimitive('a-grid', {
+      defaultComponents: { geometry: {primitive: 'plane'}, material: {color:'#666', shader:'flat', wireframe:true, opacity:0.25, transparent:true}},
+      mappings: { width: 'geometry.width', height:'geometry.height', color:'material.color', divisions:'material.repeats' }
+    });
+  </script>
+
+  <!-- Негізгі логика -->
+  <script>
+  const cmToMeters = cm => cm/100; // 1 м = 100 см
+  const mlToHeight = ml => (ml/100) * 0.12; // 100 мл -> 0.12 м (мензуркаға шартты сәйкестік)
+
+  const state = {
+    scale: 1.0,        // жалпы масштаб
+    targetLen: 12.5,   // см
+    targetVol: 60,     // мл
+  };
+
+  const hud = {
+    scale: document.getElementById('scale'),
+    scaleVal: document.getElementById('scaleVal'),
+    waterml: document.getElementById('waterml'),
+    waterVal: document.getElementById('waterVal'),
+    lenInput: document.getElementById('lenInput'),
+    volInput: document.getElementById('volInput'),
+    check: document.getElementById('check'),
+    newtask: document.getElementById('newtask'),
+    task: document.getElementById('task'),
+    toast: document.getElementById('toast'),
+  };
+
+  function toast(msg){ hud.toast.textContent = msg; hud.toast.classList.add('show'); setTimeout(()=>hud.toast.classList.remove('show'), 1800); }
+
+  // Сызғыш генерациясы (0–20 см, әр 1 см белгі)
+  function buildRuler(entity){
+    entity.innerHTML='';
+    const base = document.createElement('a-box');
+    base.setAttribute('depth',0.01); base.setAttribute('height',0.02); base.setAttribute('width', cmToMeters(20));
+    base.setAttribute('color','#caa472'); base.setAttribute('position', `${cmToMeters(10)} 0 0`);
+    entity.appendChild(base);
+
+    for(let i=0;i<=20;i++){
+      const tick = document.createElement('a-box');
+      const isBig = (i%5===0);
+      tick.setAttribute('depth',0.012);
+      tick.setAttribute('height', isBig?0.018:0.012);
+      tick.setAttribute('width', 0.002);
+      tick.setAttribute('color','#111');
+      tick.setAttribute('position', `${cmToMeters(i)} ${ (isBig?0.011:0.009)} 0`);
+      entity.appendChild(tick);
+
+      if(isBig){
+        const label = document.createElement('a-text');
+        label.setAttribute('value', i.toString());
+        label.setAttribute('color', '#111');
+        label.setAttribute('align','center');
+        label.setAttribute('width','0.2');
+        label.setAttribute('position', `${cmToMeters(i)} 0.02 0`);
+        entity.appendChild(label);
+      }
+    }
+
+    // Нысанды туралау көмегі үшін «0» бастау нүктесін белгілеу
+    const zeroPin = document.createElement('a-sphere');
+    zeroPin.setAttribute('radius', 0.005);
+    zeroPin.setAttribute('color', '#e74c3c');
+    zeroPin.setAttribute('position', `0 0.014 0.002`);
+    entity.appendChild(zeroPin);
+  }
+
+  // Мензурка генерациясы (радиус 2.2 см, биіктік 12 см)
+  function buildBeaker(entity){
+    entity.innerHTML='';
+
+    const glass = document.createElement('a-cylinder');
+    glass.setAttribute('radius', cmToMeters(2.2));
+    glass.setAttribute('height', cmToMeters(12));
+    glass.setAttribute('material', 'color: #88a; opacity:0.2; transparent:true; wireframe:true');
+    glass.setAttribute('position', `0 ${cmToMeters(6)} 0`);
+    entity.appendChild(glass);
+
+    // Су (биіктігі су деңгейіне тәуелді)
+    const water = document.createElement('a-cylinder');
+    water.setAttribute('id','water');
+    water.setAttribute('radius', cmToMeters(2.1));
+    water.setAttribute('height', mlToHeight(parseInt(hud.waterml.value)) );
+    water.setAttribute('material', 'color: #55c; opacity:0.45; transparent:true');
+    water.object3D.position.set(0, mlToHeight(parseInt(hud.waterml.value))/2, 0);
+    entity.appendChild(water);
+
+    // Белгілер (әр 10 мл)
+    for(let ml=0; ml<=100; ml+=10){
+      const y = mlToHeight(ml);
+      const tick = document.createElement('a-box');
+      tick.setAttribute('width', cmToMeters(3.2));
+      tick.setAttribute('height', 0.0025);
+      tick.setAttribute('depth', 0.0025);
+      tick.setAttribute('color', '#111');
+      tick.setAttribute('position', `0 ${y} ${cmToMeters(2.2)}`);
+      entity.appendChild(tick);
+
+      const label = document.createElement('a-text');
+      label.setAttribute('value', ml.toString());
+      label.setAttribute('color', '#111');
+      label.setAttribute('align','center');
+      label.setAttribute('width','0.35');
+      label.setAttribute('position', `0 ${y+0.01} ${cmToMeters(2.2)}`);
+      entity.appendChild(label);
+    }
+  }
+
+  function applyScale(){
+    const s = state.scale; // бірдей масштаб екі объектіге
+    const r = document.getElementById('ruler');
+    const b = document.getElementById('beaker');
+    if(r) r.setAttribute('scale', `${s} ${s} ${s}`);
+    if(b) b.setAttribute('scale', `${s} ${s} ${s}`);
+  }
+
+  function newTask(){
+    // Ұзындық: 6.0–15.0 см, 0.5 қадам; Көлем: 30–90 мл, 5 қадам
+    const lenVals = []; for(let x=60; x<=150; x+=5){ lenVals.push(x/10); }
+    const volVals = []; for(let v=30; v<=90; v+=5){ volVals.push(v); }
+    state.targetLen = lenVals[Math.floor(Math.random()*lenVals.length)];
+    state.targetVol = volVals[Math.floor(Math.random()*volVals.length)];
+    hud.task.textContent = `Миссия: ұзындықты ≈ ${state.targetLen.toFixed(1)} см және көлемді ≈ ${state.targetVol} мл анықтаңыз.`;
+    hud.lenInput.value=''; hud.volInput.value='';
+  }
+
+  function checkAnswers(){
+    const l = parseFloat(hud.lenInput.value);
+    const v = parseInt(hud.volInput.value);
+    if(isNaN(l) || isNaN(v)) { toast('Алдымен екі мәнді де енгізіңіз.'); return; }
+    const lenErr = Math.abs(l - state.targetLen);
+    const volErr = Math.abs(v - state.targetVol);
+
+    const okLen = lenErr <= 0.5; // 0.5 см дәлдік
+    const okVol = volErr <= 5;   // 5 мл дәлдік
+
+    let msg = `Ұзындық қатесі: ±${lenErr.toFixed(1)} см • Көлем қатесі: ±${volErr} мл`;
+    if(okLen && okVol) msg = 'Тамаша! Екі өлшеу де рұқсат етілген дәлдікте ✅';
+    else if(okLen || okVol) msg += ' • Бір мән дұрыс диапазонда ✅';
+    else msg += ' • Дәлдікті жақсартыңыз ⛔';
+
+    toast(msg);
+  }
+
+  // Инициализация
+  window.addEventListener('DOMContentLoaded', ()=>{
+    buildRuler(document.getElementById('ruler'));
+    buildBeaker(document.getElementById('beaker'));
+    newTask();
+
+    hud.scale.addEventListener('input', e=>{
+      const pct = parseInt(e.target.value);
+      hud.scaleVal.textContent = pct + '%';
+      state.scale = pct/100;
+      applyScale();
+    });
+
+    hud.waterml.addEventListener('input', e=>{
+      const ml = parseInt(e.target.value);
+      hud.waterVal.textContent = ml;
+      // су цилиндрін жаңарту
+      const water = document.querySelector('#beaker #water');
+      const h = mlToHeight(ml);
+      water.setAttribute('height', h);
+      water.object3D.position.set(0, h/2, 0);
+    });
+
+    hud.check.addEventListener('click', checkAnswers);
+    hud.newtask.addEventListener('click', newTask);
+  });
+  </script>
+
+  <!-- Мұғалімге ескертпелер:
+    • Бұл прототип marker-based WebAR (Hiro) қолданады. Маркерді экранда көрсетуге де болады.
+    • Камера рұқсатын беріңіз. Тестілеу үшін Chrome/Android жақсы жұмыс істейді.
+    • Масштаб (калибрлеу) слайдері виртуалды шкаланы нақты жабдықпен сәйкестендіруге көмектеседі.
+    • Қауіпсіздік: нақты мензурка/су қолдансаңыз, құрылғыдан алыста ұстаңыз.
+  -->
+</body>
+</html>
