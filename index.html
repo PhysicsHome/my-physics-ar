@@ -53,7 +53,7 @@
   <!-- AR сахнасы -->
   <a-scene embedded vr-mode-ui="enabled: false" renderer="logarithmicDepthBuffer: true" arjs="sourceType: webcam; detectionMode: mono; debugUIEnabled: false;">
     <!-- Маркер: стандартты Hiro -->
-    <a-marker preset="hiro" size="0.16">
+    <a-marker preset="hiro">
       <!-- Референс жазықтық (маркер үсті) -->
       <a-plane position="0 0 0" rotation="-90 0 0" width="1" height="1" color="#333" opacity="0.15"></a-plane>
 
@@ -106,19 +106,15 @@
 
   function toast(msg){ hud.toast.textContent = msg; hud.toast.classList.add('show'); setTimeout(()=>hud.toast.classList.remove('show'), 1800); }
 
-  // Сызғыш генерациясы (0–30 см, әр 1 см белгі). Ретикл маркердің қасына шығарылады
+  // Сызғыш генерациясы (0–20 см, әр 1 см белгі)
   function buildRuler(entity){
     entity.innerHTML='';
-    // Ретиклді маркердің шетінен бастау үшін позицияны кейін қоямыз
-    entity.setAttribute('position', '-0.15 0.02 0.12');
-
-    const totalCm = 30;
     const base = document.createElement('a-box');
-    base.setAttribute('depth',0.01); base.setAttribute('height',0.02); base.setAttribute('width', cmToMeters(totalCm));
-    base.setAttribute('color','#caa472'); base.setAttribute('position', `${cmToMeters(totalCm/2)} 0 0`);
+    base.setAttribute('depth',0.01); base.setAttribute('height',0.02); base.setAttribute('width', cmToMeters(20));
+    base.setAttribute('color','#caa472'); base.setAttribute('position', `${cmToMeters(10)} 0 0`);
     entity.appendChild(base);
 
-    for(let i=0;i<=totalCm;i++){
+    for(let i=0;i<=20;i++){
       const tick = document.createElement('a-box');
       const isBig = (i%5===0);
       tick.setAttribute('depth',0.012);
@@ -137,14 +133,6 @@
         label.setAttribute('position', `${cmToMeters(i)} 0.02 0`);
         entity.appendChild(label);
       }
-    }
-
-    const zeroPin = document.createElement('a-sphere');
-    zeroPin.setAttribute('radius', 0.005);
-    zeroPin.setAttribute('color', '#e74c3c');
-    zeroPin.setAttribute('position', `0 0.014 0.002`);
-    entity.appendChild(zeroPin);
-  }
     }
 
     // Нысанды туралау көмегі үшін «0» бастау нүктесін белгілеу
@@ -268,3 +256,4 @@
   -->
 </body>
 </html>
+
